@@ -1,0 +1,2459 @@
+Código fuente
+Ferretería El Tornillo Feliz
+El código está organizado en las tres capas del sistema y, dentro de cada una, por clase o formulario. Los archivos de diseño generados por Visual Studio (*.Designer.cs) no se incluyen, porque los controles se crean por código en el método CrearControles() de cada formulario.
+
+
+1. Capa de Entidades
+Clases que transportan datos entre las capas. No acceden a la base de datos.
+1.1 Producto
+Archivo: Entidades/Producto.cs. Artículo del inventario, con su alerta de stock mínimo.
+namespace FerreteriaTornilloFeliz.Entidades
+{
+    /// <summary>
+    /// Representa un producto del inventario de la ferretería.
+    /// Es una entidad: solo guarda datos, no accede a la base de datos.
+    /// </summary>
+    public class Producto
+    {
+        public int Id { get; set; }
+        public string Codigo { get; set; }
+        public string Nombre { get; set; }
+        public string Categoria { get; set; }
+        public decimal PrecioCompra { get; set; }
+        public decimal PrecioVenta { get; set; }
+        public int Stock { get; set; }
+        public int StockMinimo { get; set; }
+        public bool Activo { get; set; }
+ 
+        /// <summary>Constructor vacío: un producto nuevo nace activo.</summary>
+        public Producto()
+        {
+            Activo = true;
+        }
+ 
+        /// <summary>Constructor completo, usado al leer un producto desde la base de datos.</summary>
+        public Producto(int id, string codigo, string nombre, string categoria,
+                        decimal precioCompra, decimal precioVenta,
+                        int stock, int stockMinimo, bool activo)
+        {
+            Id = id;
+            Codigo = codigo;
+            Nombre = nombre;
+            Categoria = categoria;
+            PrecioCompra = precioCompra;
+            PrecioVenta = precioVenta;
+            Stock = stock;
+            StockMinimo = stockMinimo;
+            Activo = activo;
+        }
+ 
+        /// <summary>Verdadero cuando el stock está en el mínimo o por debajo (alerta de reabastecimiento).</summary>
+        public bool BajoMinimo
+        {
+            get { return Stock <= StockMinimo; }
+        }
+    }
+}
+ 
+
+1.2 Venta
+Archivo: Entidades/Venta.cs. Encabezado de la venta; contiene la lista de líneas y calcula el total.
+using System;
+using System.Collections.Generic;
+ 
+namespace FerreteriaTornilloFeliz.Entidades
+{
+    /// <summary>
+    /// Representa una venta con sus líneas de detalle (composición: una venta contiene
+    /// uno o más DetalleVenta). Es una entidad: no accede a la base de datos.
+    /// </summary>
+    public class Venta
+    {
+        public int Id { get; set; }
+        public DateTime Fecha { get; set; }
+        public bool Anulada { get; set; }
+        public decimal Total { get; set; }
+ 
+        /// <summary>Líneas de la venta. Solo se modifican con AgregarDetalle y QuitarDetalle.</summary>
+        public List<DetalleVenta> Detalles { get; private set; }
+ 
+        public Venta()
+        {
+            Detalles = new List<DetalleVenta>();
+            Fecha = DateTime.Now;
+        }
+ 
+        /// <summary>
+        /// Agrega una línea. Si el producto ya está en la venta, suma la cantidad
+        /// en lugar de crear una segunda línea.
+        /// </summary>
+        public void AgregarDetalle(DetalleVenta nuevo)
+        {
+            if (nuevo == null)
+                throw new ArgumentNullException("nuevo");
+ 
+            foreach (DetalleVenta existente in Detalles)
+            {
+                if (existente.IdProducto == nuevo.IdProducto)
+                {
+                    existente.Cantidad += nuevo.Cantidad;
+                    return;
+                }
+            }
+ 
+            Detalles.Add(nuevo);
+        }
+ 
+        /// <summary>Quita de la venta la línea de ese producto.</summary>
+        public void QuitarDetalle(int idProducto)
+        {
+            Detalles.RemoveAll(d => d.IdProducto == idProducto);
+        }
+ 
+        /// <summary>Suma los subtotales de todas las líneas.</summary>
+        public decimal CalcularTotal()
+        {
+            decimal total = 0;
+            foreach (DetalleVenta d in Detalles)
+                total += d.Subtotal;
+            return total;
+        }
+    }
+}
+ 
+
+1.3 DetalleVenta
+Archivo: Entidades/DetalleVenta.cs. Línea de una venta: producto, cantidad, precio y costo.
+namespace FerreteriaTornilloFeliz.Entidades
+{
+    /// <summary>
+    /// Una línea de una venta: un producto, su cantidad y los precios vigentes al momento de vender.
+    /// Guarda también el costo unitario, para que los reportes de utilidad no cambien si
+    /// después se modifica el precio de compra del producto.
+    /// </summary>
+    public class DetalleVenta
+    {
+        public int IdProducto { get; set; }
+        public string CodigoProducto { get; set; }
+        public string NombreProducto { get; set; }
+        public int Cantidad { get; set; }
+        public decimal PrecioUnitario { get; set; }
+        public decimal CostoUnitario { get; set; }
+ 
+        /// <summary>Importe de la línea: cantidad por precio unitario.</summary>
+        public decimal Subtotal
+        {
+            get { return Cantidad * PrecioUnitario; }
+        }
+    }
+}
+ 
+
+1.4 ProductoVendido
+Archivo: Entidades/ProductoVendido.cs. Resumen por producto para el reporte de más vendidos.
+namespace FerreteriaTornilloFeliz.Entidades
+{
+    /// <summary>
+    /// Resumen de lo vendido de un producto en un período (para el reporte "Por producto").
+    /// </summary>
+    public class ProductoVendido
+    {
+        public string Codigo { get; set; }
+        public string Nombre { get; set; }
+        public int Unidades { get; set; }
+        public decimal Ingreso { get; set; }
+        public decimal Costo { get; set; }
+ 
+        /// <summary>Ganancia del producto: ingreso menos costo.</summary>
+        public decimal Utilidad
+        {
+            get { return Ingreso - Costo; }
+        }
+    }
+}
+ 
+
+1.5 ResultadoRentabilidad
+Archivo: Entidades/ResultadoRentabilidad.cs. Indicadores del reporte: ingreso, costo, utilidad, margen y punto de equilibrio.
+namespace FerreteriaTornilloFeliz.Entidades
+{
+    /// <summary>
+    /// Resultados del reporte de rentabilidad de un período. Es una entidad de transporte:
+    /// los cálculos los hace ReporteLN y la pantalla solo los muestra.
+    /// </summary>
+    public class ResultadoRentabilidad
+    {
+        public int NumeroVentas { get; set; }
+        public int UnidadesVendidas { get; set; }
+ 
+        public decimal Ingreso { get; set; }
+        public decimal Costo { get; set; }
+        public decimal Utilidad { get; set; }
+        public decimal MargenPorcentaje { get; set; }
+ 
+        public decimal CostosFijos { get; set; }
+ 
+        /// <summary>Unidades a vender para cubrir los costos fijos. Null si no se puede calcular.</summary>
+        public decimal? PuntoEquilibrioUnidades { get; set; }
+ 
+        /// <summary>Ventas en quetzales para cubrir los costos fijos. Null si no se puede calcular.</summary>
+        public decimal? PuntoEquilibrioQuetzales { get; set; }
+    }
+}
+ 
+
+2. Capa de Lógica de Negocios
+Validaciones, reglas de negocio, consultas SQL parametrizadas y transacciones.
+2.1 ReglaNegocioException
+Archivo: LogicaNegocios/ReglaNegocioException.cs. Excepción propia para las reglas que el usuario incumple.
+using System;
+ 
+namespace FerreteriaTornilloFeliz.LogicaNegocios
+{
+    /// <summary>
+    /// Se lanza cuando una operación incumple una regla de negocio o una validación
+    /// (por ejemplo: código duplicado o precio negativo). Su mensaje se muestra al usuario.
+    /// </summary>
+    public class ReglaNegocioException : Exception
+    {
+        public ReglaNegocioException(string mensaje) : base(mensaje)
+        {
+        }
+    }
+}
+ 
+
+2.2 ConexionBD
+Archivo: LogicaNegocios/ConexionBD.cs. Crea la conexión a SQL Server desde App.config.
+using System.Configuration;
+using System.Data.SqlClient;
+ 
+namespace FerreteriaTornilloFeliz.LogicaNegocios
+{
+    /// <summary>
+    /// Crea conexiones a SQL Server usando la cadena "conexionFerreteria" de App.config.
+    /// Cada clase de lógica abre y cierra su propia conexión con "using".
+    /// </summary>
+    public static class ConexionBD
+    {
+        public static SqlConnection ObtenerConexion()
+        {
+            string cadena = ConfigurationManager.ConnectionStrings["conexionFerreteria"].ConnectionString;
+            return new SqlConnection(cadena);
+        }
+    }
+}
+ 
+
+2.3 ProductoLN
+Archivo: LogicaNegocios/ProductoLN.cs. Registro, edición, desactivación y búsqueda de productos.
+using System;
+using System.Collections.Generic;
+using System.Data.SqlClient;
+using FerreteriaTornilloFeliz.Entidades;
+ 
+namespace FerreteriaTornilloFeliz.LogicaNegocios
+{
+    /// <summary>
+    /// Lógica de negocio de los productos: valida las reglas y guarda/consulta en SQL Server.
+    /// Todas las consultas usan parámetros (protección contra inyección SQL).
+    /// </summary>
+    public class ProductoLN
+    {
+        private const string Columnas =
+            "Id, Codigo, Nombre, Categoria, PrecioCompra, PrecioVenta, Stock, StockMinimo, Activo";
+ 
+        // ---------- Validaciones (reglas de negocio) ----------
+ 
+        private static void Validar(Producto p)
+        {
+            if (p == null)
+                throw new ReglaNegocioException("No se recibieron los datos del producto.");
+ 
+            if (string.IsNullOrWhiteSpace(p.Codigo))
+                throw new ReglaNegocioException("El código es obligatorio.");
+            if (p.Codigo.Trim().Length > 20)
+                throw new ReglaNegocioException("El código no puede tener más de 20 caracteres.");
+ 
+            if (string.IsNullOrWhiteSpace(p.Nombre))
+                throw new ReglaNegocioException("El nombre es obligatorio.");
+            if (p.Nombre.Trim().Length > 100)
+                throw new ReglaNegocioException("El nombre no puede tener más de 100 caracteres.");
+ 
+            if (string.IsNullOrWhiteSpace(p.Categoria))
+                throw new ReglaNegocioException("La categoría es obligatoria.");
+            if (p.Categoria.Trim().Length > 50)
+                throw new ReglaNegocioException("La categoría no puede tener más de 50 caracteres.");
+ 
+            if (p.PrecioCompra < 0)
+                throw new ReglaNegocioException("El precio de compra no puede ser negativo.");
+            if (p.PrecioVenta <= 0)
+                throw new ReglaNegocioException("El precio de venta debe ser mayor que cero.");
+            if (p.PrecioCompra > 1000000 || p.PrecioVenta > 1000000)
+                throw new ReglaNegocioException("Los precios no pueden superar Q1,000,000.");
+            if (p.PrecioVenta < p.PrecioCompra)
+                throw new ReglaNegocioException("El precio de venta no puede ser menor que el precio de compra.");
+ 
+            if (p.Stock < 0)
+                throw new ReglaNegocioException("El stock no puede ser negativo.");
+            if (p.StockMinimo < 0)
+                throw new ReglaNegocioException("El stock mínimo no puede ser negativo.");
+        }
+ 
+        // ---------- Operaciones de escritura ----------
+ 
+        /// <summary>Registra un producto nuevo. Rechaza códigos repetidos.</summary>
+        public void Registrar(Producto p)
+        {
+            Validar(p);
+            string codigo = p.Codigo.Trim();
+ 
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            {
+                cn.Open();
+ 
+                if (ExisteCodigo(cn, codigo, 0))
+                    throw new ReglaNegocioException(
+                        "Ya existe un producto con el código " + codigo + " (puede estar desactivado).");
+ 
+                const string sql =
+                    "INSERT INTO Productos (Codigo, Nombre, Categoria, PrecioCompra, PrecioVenta, Stock, StockMinimo, Activo) " +
+                    "VALUES (@codigo, @nombre, @categoria, @compra, @venta, @stock, @minimo, 1)";
+ 
+                using (SqlCommand cmd = new SqlCommand(sql, cn))
+                {
+                    AsignarParametros(cmd, p);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+        }
+ 
+        /// <summary>Actualiza un producto existente. Rechaza códigos que ya usa otro producto.</summary>
+        public void Actualizar(Producto p)
+        {
+            Validar(p);
+            string codigo = p.Codigo.Trim();
+ 
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            {
+                cn.Open();
+ 
+                if (ExisteCodigo(cn, codigo, p.Id))
+                    throw new ReglaNegocioException(
+                        "Ya existe otro producto con el código " + codigo + " (puede estar desactivado).");
+ 
+                const string sql =
+                    "UPDATE Productos SET Codigo = @codigo, Nombre = @nombre, Categoria = @categoria, " +
+                    "PrecioCompra = @compra, PrecioVenta = @venta, Stock = @stock, StockMinimo = @minimo " +
+                    "WHERE Id = @id AND Activo = 1";
+ 
+                using (SqlCommand cmd = new SqlCommand(sql, cn))
+                {
+                    AsignarParametros(cmd, p);
+                    cmd.Parameters.AddWithValue("@id", p.Id);
+ 
+                    if (cmd.ExecuteNonQuery() == 0)
+                        throw new ReglaNegocioException("El producto ya no existe o fue desactivado.");
+                }
+            }
+        }
+ 
+        /// <summary>
+        /// "Eliminar" un producto lo desactiva (Activo = 0). Así se conserva el historial de ventas
+        /// y los reportes no pierden información.
+        /// </summary>
+        public void Desactivar(int id)
+        {
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            {
+                cn.Open();
+                const string sql = "UPDATE Productos SET Activo = 0 WHERE Id = @id AND Activo = 1";
+ 
+                using (SqlCommand cmd = new SqlCommand(sql, cn))
+                {
+                    cmd.Parameters.AddWithValue("@id", id);
+ 
+                    if (cmd.ExecuteNonQuery() == 0)
+                        throw new ReglaNegocioException("El producto ya no existe o ya estaba desactivado.");
+                }
+            }
+        }
+ 
+        // ---------- Consultas ----------
+ 
+        /// <summary>Lista los productos activos, ordenados por nombre.</summary>
+        public List<Producto> Listar()
+        {
+            return Consultar(
+                "SELECT " + Columnas + " FROM Productos WHERE Activo = 1 ORDER BY Nombre", null);
+        }
+ 
+        /// <summary>Busca productos activos cuyo código o nombre contenga el texto.</summary>
+        public List<Producto> Buscar(string texto)
+        {
+            if (string.IsNullOrWhiteSpace(texto))
+                return Listar();
+ 
+            return Consultar(
+                "SELECT " + Columnas + " FROM Productos " +
+                "WHERE Activo = 1 AND (Codigo LIKE @texto OR Nombre LIKE @texto) ORDER BY Nombre",
+                "%" + texto.Trim() + "%");
+        }
+ 
+        /// <summary>Devuelve el producto activo con ese código exacto, o null si no existe.</summary>
+        public Producto ObtenerPorCodigo(string codigo)
+        {
+            if (string.IsNullOrWhiteSpace(codigo))
+                return null;
+ 
+            List<Producto> lista = Consultar(
+                "SELECT " + Columnas + " FROM Productos WHERE Activo = 1 AND Codigo = @texto",
+                codigo.Trim());
+ 
+            return lista.Count > 0 ? lista[0] : null;
+        }
+ 
+        /// <summary>Lista los productos activos con stock en el mínimo o por debajo (alertas).</summary>
+        public List<Producto> ListarBajoMinimo()
+        {
+            return Consultar(
+                "SELECT " + Columnas + " FROM Productos " +
+                "WHERE Activo = 1 AND Stock <= StockMinimo ORDER BY Stock, Nombre", null);
+        }
+ 
+        // ---------- Métodos auxiliares privados ----------
+ 
+        private static bool ExisteCodigo(SqlConnection cn, string codigo, int idExcluido)
+        {
+            const string sql = "SELECT COUNT(*) FROM Productos WHERE Codigo = @codigo AND Id <> @id";
+ 
+            using (SqlCommand cmd = new SqlCommand(sql, cn))
+            {
+                cmd.Parameters.AddWithValue("@codigo", codigo);
+                cmd.Parameters.AddWithValue("@id", idExcluido);
+                return (int)cmd.ExecuteScalar() > 0;
+            }
+        }
+ 
+        private static void AsignarParametros(SqlCommand cmd, Producto p)
+        {
+            cmd.Parameters.AddWithValue("@codigo", p.Codigo.Trim());
+            cmd.Parameters.AddWithValue("@nombre", p.Nombre.Trim());
+            cmd.Parameters.AddWithValue("@categoria", p.Categoria.Trim());
+            cmd.Parameters.AddWithValue("@compra", Math.Round(p.PrecioCompra, 2));
+            cmd.Parameters.AddWithValue("@venta", Math.Round(p.PrecioVenta, 2));
+            cmd.Parameters.AddWithValue("@stock", p.Stock);
+            cmd.Parameters.AddWithValue("@minimo", p.StockMinimo);
+        }
+ 
+        private static List<Producto> Consultar(string sql, string parametroTexto)
+        {
+            List<Producto> lista = new List<Producto>();
+ 
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            using (SqlCommand cmd = new SqlCommand(sql, cn))
+            {
+                if (parametroTexto != null)
+                    cmd.Parameters.AddWithValue("@texto", parametroTexto);
+ 
+                cn.Open();
+                using (SqlDataReader dr = cmd.ExecuteReader())
+                {
+                    while (dr.Read())
+                        lista.Add(Mapear(dr));
+                }
+            }
+ 
+            return lista;
+        }
+ 
+        // El orden de las columnas coincide con la constante Columnas.
+        private static Producto Mapear(SqlDataReader dr)
+        {
+            return new Producto(
+                dr.GetInt32(0),     // Id
+                dr.GetString(1),    // Codigo
+                dr.GetString(2),    // Nombre
+                dr.GetString(3),    // Categoria
+                dr.GetDecimal(4),   // PrecioCompra
+                dr.GetDecimal(5),   // PrecioVenta
+                dr.GetInt32(6),     // Stock
+                dr.GetInt32(7),     // StockMinimo
+                dr.GetBoolean(8));  // Activo
+        }
+    }
+}
+ 
+
+2.4 VentaLN
+Archivo: LogicaNegocios/VentaLN.cs. Registro de ventas en una transacción SQL y listado por fechas.
+using System;
+using System.Collections.Generic;
+using System.Data.SqlClient;
+using FerreteriaTornilloFeliz.Entidades;
+ 
+namespace FerreteriaTornilloFeliz.LogicaNegocios
+{
+    /// <summary>
+    /// Lógica de negocio de las ventas.
+    /// RegistrarVenta es una operación atómica: guarda la venta, sus detalles y descuenta el stock
+    /// dentro de UNA transacción SQL. Si cualquier paso falla, no se guarda nada (rollback).
+    /// </summary>
+    public class VentaLN
+    {
+        private const int CantidadMaximaPorLinea = 1000000;
+ 
+        /// <summary>
+        /// Registra la venta y devuelve su Id. La lógica NO confía en los precios que trae la pantalla:
+        /// vuelve a leer precio, costo y stock reales desde SQL Server dentro de la transacción.
+        /// </summary>
+        public int RegistrarVenta(Venta venta)
+        {
+            if (venta == null)
+                throw new ReglaNegocioException("No se recibieron los datos de la venta.");
+            if (venta.Detalles.Count == 0)
+                throw new ReglaNegocioException("La venta debe tener al menos un producto.");
+ 
+            // 1. Consolidar cantidades por producto (por si un mismo producto llega en varias líneas).
+            Dictionary<int, int> cantidades = new Dictionary<int, int>();
+            foreach (DetalleVenta d in venta.Detalles)
+            {
+                if (d.Cantidad <= 0)
+                    throw new ReglaNegocioException("La cantidad de cada producto debe ser mayor que cero.");
+                if (d.Cantidad > CantidadMaximaPorLinea)
+                    throw new ReglaNegocioException("La cantidad de un producto no puede superar " + CantidadMaximaPorLinea + ".");
+ 
+                if (cantidades.ContainsKey(d.IdProducto))
+                    cantidades[d.IdProducto] += d.Cantidad;
+                else
+                    cantidades.Add(d.IdProducto, d.Cantidad);
+            }
+ 
+            // 2. Ordenar por Id: todas las ventas bloquean los productos en el mismo orden,
+            //    lo que evita interbloqueos (deadlocks) entre ventas simultáneas.
+            List<int> ids = new List<int>(cantidades.Keys);
+            ids.Sort();
+ 
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            {
+                cn.Open();
+ 
+                using (SqlTransaction tx = cn.BeginTransaction())
+                {
+                    try
+                    {
+                        // 3. Leer y bloquear cada producto, validando existencia, estado y stock.
+                        List<DetalleVenta> lineas = new List<DetalleVenta>();
+                        decimal total = 0;
+ 
+                        foreach (int idProducto in ids)
+                        {
+                            DetalleVenta linea = LeerYBloquearProducto(cn, tx, idProducto, cantidades[idProducto]);
+                            lineas.Add(linea);
+                            total += linea.Subtotal;
+                        }
+ 
+                        // 4. Guardar la venta, sus detalles y descontar el stock.
+                        int idVenta = InsertarVenta(cn, tx, total);
+ 
+                        foreach (DetalleVenta linea in lineas)
+                        {
+                            InsertarDetalle(cn, tx, idVenta, linea);
+                            DescontarStock(cn, tx, linea);
+                        }
+ 
+                        // 5. Todo salió bien: confirmar.
+                        tx.Commit();
+ 
+                        venta.Id = idVenta;
+                        venta.Total = total;
+                        return idVenta;
+                    }
+                    catch
+                    {
+                        try { tx.Rollback(); }
+                        catch { /* si la conexión ya se perdió, SQL Server revierte por su cuenta */ }
+                        throw;
+                    }
+                }
+            }
+        }
+ 
+        /// <summary>
+        /// Lista las ventas no anuladas entre dos fechas (inclusive), de la más reciente a la más antigua.
+        /// Las ventas devueltas traen Id, Fecha y Total; sus detalles no se cargan.
+        /// </summary>
+        public List<Venta> ListarPorFechas(DateTime desde, DateTime hasta)
+        {
+            if (desde.Date > hasta.Date)
+                throw new ReglaNegocioException("La fecha inicial no puede ser mayor que la fecha final.");
+ 
+            List<Venta> lista = new List<Venta>();
+ 
+            const string sql =
+                "SELECT Id, Fecha, Total, Anulada FROM Ventas " +
+                "WHERE Anulada = 0 AND Fecha >= @inicio AND Fecha < @fin " +
+                "ORDER BY Fecha DESC, Id DESC";
+ 
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            using (SqlCommand cmd = new SqlCommand(sql, cn))
+            {
+                cmd.Parameters.AddWithValue("@inicio", desde.Date);
+                cmd.Parameters.AddWithValue("@fin", hasta.Date.AddDays(1));
+                cn.Open();
+ 
+                using (SqlDataReader dr = cmd.ExecuteReader())
+                {
+                    while (dr.Read())
+                    {
+                        lista.Add(new Venta
+                        {
+                            Id = dr.GetInt32(0),
+                            Fecha = dr.GetDateTime(1),
+                            Total = dr.GetDecimal(2),
+                            Anulada = dr.GetBoolean(3)
+                        });
+                    }
+                }
+            }
+ 
+            return lista;
+        }
+ 
+        // ---------- Pasos de la transacción ----------
+ 
+        // Lee el producto con UPDLOCK: nadie más puede cambiar su stock hasta que termine esta transacción.
+        private static DetalleVenta LeerYBloquearProducto(SqlConnection cn, SqlTransaction tx, int idProducto, int cantidad)
+        {
+            const string sql =
+                "SELECT Codigo, Nombre, PrecioCompra, PrecioVenta, Stock, Activo " +
+                "FROM Productos WITH (UPDLOCK, ROWLOCK) WHERE Id = @id";
+ 
+            using (SqlCommand cmd = new SqlCommand(sql, cn, tx))
+            {
+                cmd.Parameters.AddWithValue("@id", idProducto);
+ 
+                using (SqlDataReader dr = cmd.ExecuteReader())
+                {
+                    if (!dr.Read())
+                        throw new ReglaNegocioException("El producto con Id " + idProducto + " no existe.");
+ 
+                    string codigo = dr.GetString(0);
+                    string nombre = dr.GetString(1);
+                    decimal precioCompra = dr.GetDecimal(2);
+                    decimal precioVenta = dr.GetDecimal(3);
+                    int stock = dr.GetInt32(4);
+                    bool activo = dr.GetBoolean(5);
+ 
+                    if (!activo)
+                        throw new ReglaNegocioException(
+                            "El producto \"" + nombre + "\" está desactivado y no se puede vender.");
+ 
+                    if (cantidad > stock)
+                        throw new ReglaNegocioException(
+                            "Stock insuficiente de \"" + nombre + "\": disponible " + stock +
+                            ", solicitado " + cantidad + ". No se registró la venta.");
+ 
+                    return new DetalleVenta
+                    {
+                        IdProducto = idProducto,
+                        CodigoProducto = codigo,
+                        NombreProducto = nombre,
+                        Cantidad = cantidad,
+                        PrecioUnitario = precioVenta,
+                        CostoUnitario = precioCompra
+                    };
+                }
+            }
+        }
+ 
+        // Fecha y Anulada toman sus valores por defecto de la tabla (GETDATE() y 0).
+        private static int InsertarVenta(SqlConnection cn, SqlTransaction tx, decimal total)
+        {
+            const string sql =
+                "INSERT INTO Ventas (Total) VALUES (@total); " +
+                "SELECT CAST(SCOPE_IDENTITY() AS INT);";
+ 
+            using (SqlCommand cmd = new SqlCommand(sql, cn, tx))
+            {
+                cmd.Parameters.AddWithValue("@total", total);
+                return (int)cmd.ExecuteScalar();
+            }
+        }
+ 
+        private static void InsertarDetalle(SqlConnection cn, SqlTransaction tx, int idVenta, DetalleVenta linea)
+        {
+            const string sql =
+                "INSERT INTO DetalleVenta (IdVenta, IdProducto, Cantidad, PrecioUnitario, CostoUnitario) " +
+                "VALUES (@idVenta, @idProducto, @cantidad, @precio, @costo)";
+ 
+            using (SqlCommand cmd = new SqlCommand(sql, cn, tx))
+            {
+                cmd.Parameters.AddWithValue("@idVenta", idVenta);
+                cmd.Parameters.AddWithValue("@idProducto", linea.IdProducto);
+                cmd.Parameters.AddWithValue("@cantidad", linea.Cantidad);
+                cmd.Parameters.AddWithValue("@precio", linea.PrecioUnitario);
+                cmd.Parameters.AddWithValue("@costo", linea.CostoUnitario);
+                cmd.ExecuteNonQuery();
+            }
+        }
+ 
+        // La condición "Stock >= @cantidad" es la última defensa: el stock nunca queda negativo.
+        private static void DescontarStock(SqlConnection cn, SqlTransaction tx, DetalleVenta linea)
+        {
+            const string sql =
+                "UPDATE Productos SET Stock = Stock - @cantidad " +
+                "WHERE Id = @id AND Stock >= @cantidad";
+ 
+            using (SqlCommand cmd = new SqlCommand(sql, cn, tx))
+            {
+                cmd.Parameters.AddWithValue("@cantidad", linea.Cantidad);
+                cmd.Parameters.AddWithValue("@id", linea.IdProducto);
+ 
+                if (cmd.ExecuteNonQuery() != 1)
+                    throw new ReglaNegocioException(
+                        "No se pudo descontar el stock de \"" + linea.NombreProducto +
+                        "\" porque las existencias cambiaron. Intente de nuevo.");
+            }
+        }
+    }
+}
+ 
+
+2.5 ConfiguracionLN
+Archivo: LogicaNegocios/ConfiguracionLN.cs. Lectura y guardado de los costos fijos mensuales.
+using System;
+using System.Data.SqlClient;
+ 
+namespace FerreteriaTornilloFeliz.LogicaNegocios
+{
+    /// <summary>
+    /// Lee y guarda los parámetros del sistema. Por ahora, los costos fijos mensuales
+    /// (alquiler, salarios, servicios), usados para calcular el punto de equilibrio.
+    /// La tabla Configuracion tiene una sola fila (Id = 1).
+    /// </summary>
+    public class ConfiguracionLN
+    {
+        private const decimal CostosFijosMaximos = 100000000m;
+ 
+        /// <summary>Devuelve los costos fijos mensuales guardados (0 si aún no hay registro).</summary>
+        public decimal ObtenerCostosFijos()
+        {
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            using (SqlCommand cmd = new SqlCommand(
+                "SELECT CostosFijosMensuales FROM Configuracion WHERE Id = 1", cn))
+            {
+                cn.Open();
+                object resultado = cmd.ExecuteScalar();
+ 
+                if (resultado == null || resultado == DBNull.Value)
+                    return 0m;
+ 
+                return (decimal)resultado;
+            }
+        }
+ 
+        /// <summary>Guarda los costos fijos mensuales. No acepta valores negativos.</summary>
+        public void GuardarCostosFijos(decimal valor)
+        {
+            if (valor < 0)
+                throw new ReglaNegocioException("Los costos fijos no pueden ser negativos.");
+            if (valor > CostosFijosMaximos)
+                throw new ReglaNegocioException("Los costos fijos no pueden superar Q100,000,000.");
+ 
+            decimal redondeado = Math.Round(valor, 2);
+ 
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            {
+                cn.Open();
+ 
+                using (SqlCommand actualizar = new SqlCommand(
+                    "UPDATE Configuracion SET CostosFijosMensuales = @valor WHERE Id = 1", cn))
+                {
+                    actualizar.Parameters.AddWithValue("@valor", redondeado);
+ 
+                    // Si por alguna razón la fila no existe, se crea.
+                    if (actualizar.ExecuteNonQuery() == 0)
+                    {
+                        using (SqlCommand insertar = new SqlCommand(
+                            "INSERT INTO Configuracion (Id, CostosFijosMensuales) VALUES (1, @valor)", cn))
+                        {
+                            insertar.Parameters.AddWithValue("@valor", redondeado);
+                            insertar.ExecuteNonQuery();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+ 
+
+2.6 ReporteLN
+Archivo: LogicaNegocios/ReporteLN.cs. Rentabilidad, punto de equilibrio y productos más vendidos.
+using System;
+using System.Collections.Generic;
+using System.Data.SqlClient;
+using FerreteriaTornilloFeliz.Entidades;
+ 
+namespace FerreteriaTornilloFeliz.LogicaNegocios
+{
+    /// <summary>
+    /// Reportes del negocio. Las sumas las hace SQL Server (SUM y GROUP BY sobre los datos guardados);
+    /// aquí se aplican las fórmulas de rentabilidad y de punto de equilibrio.
+    /// Solo cuentan las ventas no anuladas, y las fechas se tratan de forma inclusiva (todo el día "hasta").
+    /// </summary>
+    public class ReporteLN
+    {
+        private readonly ConfiguracionLN _configuracionLN = new ConfiguracionLN();
+ 
+        /// <summary>
+        /// Calcula ingreso, costo, utilidad, margen y punto de equilibrio del período.
+        ///   Ingreso  = suma de (precio unitario x cantidad)
+        ///   Costo    = suma de (costo unitario x cantidad), con el costo guardado al momento de vender
+        ///   Utilidad = Ingreso - Costo          Margen % = Utilidad / Ingreso x 100
+        ///   Punto de equilibrio (unidades)   = costos fijos / (utilidad / unidades vendidas)
+        ///   Punto de equilibrio (quetzales)  = costos fijos / (utilidad / ingreso)
+        /// </summary>
+        public ResultadoRentabilidad Rentabilidad(DateTime desde, DateTime hasta)
+        {
+            DateTime inicio, fin;
+            ObtenerLimites(desde, hasta, out inicio, out fin);
+ 
+            ResultadoRentabilidad r = new ResultadoRentabilidad();
+ 
+            const string sql =
+                "SELECT ISNULL(SUM(d.Cantidad * d.PrecioUnitario), 0), " +
+                "       ISNULL(SUM(d.Cantidad * d.CostoUnitario), 0), " +
+                "       ISNULL(SUM(d.Cantidad), 0), " +
+                "       COUNT(DISTINCT v.Id) " +
+                "FROM Ventas v INNER JOIN DetalleVenta d ON d.IdVenta = v.Id " +
+                "WHERE v.Anulada = 0 AND v.Fecha >= @inicio AND v.Fecha < @fin";
+ 
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            using (SqlCommand cmd = new SqlCommand(sql, cn))
+            {
+                cmd.Parameters.AddWithValue("@inicio", inicio);
+                cmd.Parameters.AddWithValue("@fin", fin);
+                cn.Open();
+ 
+                using (SqlDataReader dr = cmd.ExecuteReader())
+                {
+                    if (dr.Read())
+                    {
+                        r.Ingreso = dr.GetDecimal(0);
+                        r.Costo = dr.GetDecimal(1);
+                        r.UnidadesVendidas = dr.GetInt32(2);
+                        r.NumeroVentas = dr.GetInt32(3);
+                    }
+                }
+            }
+ 
+            r.Utilidad = r.Ingreso - r.Costo;
+            r.MargenPorcentaje = r.Ingreso > 0 ? Math.Round(r.Utilidad / r.Ingreso * 100, 2) : 0m;
+            r.CostosFijos = _configuracionLN.ObtenerCostosFijos();
+ 
+            // El punto de equilibrio solo tiene sentido si hubo ventas con utilidad positiva.
+            // En caso contrario queda en null y la pantalla muestra "No calculable" (sin dividir entre cero).
+            if (r.UnidadesVendidas > 0 && r.Utilidad > 0)
+            {
+                decimal utilidadPorUnidad = r.Utilidad / r.UnidadesVendidas;
+                r.PuntoEquilibrioUnidades = Math.Ceiling(r.CostosFijos / utilidadPorUnidad);
+                r.PuntoEquilibrioQuetzales = Math.Round(r.CostosFijos / (r.Utilidad / r.Ingreso), 2);
+            }
+ 
+            return r;
+        }
+ 
+        /// <summary>Productos vendidos en el período, de más a menos unidades.</summary>
+        public List<ProductoVendido> MasVendidos(DateTime desde, DateTime hasta)
+        {
+            DateTime inicio, fin;
+            ObtenerLimites(desde, hasta, out inicio, out fin);
+ 
+            List<ProductoVendido> lista = new List<ProductoVendido>();
+ 
+            const string sql =
+                "SELECT p.Codigo, p.Nombre, SUM(d.Cantidad), " +
+                "       SUM(d.Cantidad * d.PrecioUnitario), SUM(d.Cantidad * d.CostoUnitario) " +
+                "FROM DetalleVenta d " +
+                "INNER JOIN Ventas v ON v.Id = d.IdVenta " +
+                "INNER JOIN Productos p ON p.Id = d.IdProducto " +
+                "WHERE v.Anulada = 0 AND v.Fecha >= @inicio AND v.Fecha < @fin " +
+                "GROUP BY p.Codigo, p.Nombre " +
+                "ORDER BY SUM(d.Cantidad) DESC, p.Nombre";
+ 
+            using (SqlConnection cn = ConexionBD.ObtenerConexion())
+            using (SqlCommand cmd = new SqlCommand(sql, cn))
+            {
+                cmd.Parameters.AddWithValue("@inicio", inicio);
+                cmd.Parameters.AddWithValue("@fin", fin);
+                cn.Open();
+ 
+                using (SqlDataReader dr = cmd.ExecuteReader())
+                {
+                    while (dr.Read())
+                    {
+                        lista.Add(new ProductoVendido
+                        {
+                            Codigo = dr.GetString(0),
+                            Nombre = dr.GetString(1),
+                            Unidades = dr.GetInt32(2),
+                            Ingreso = dr.GetDecimal(3),
+                            Costo = dr.GetDecimal(4)
+                        });
+                    }
+                }
+            }
+ 
+            return lista;
+        }
+ 
+        // El rango es inclusivo: desde el inicio del día "desde" hasta el final del día "hasta".
+        private static void ObtenerLimites(DateTime desde, DateTime hasta, out DateTime inicio, out DateTime fin)
+        {
+            if (desde.Date > hasta.Date)
+                throw new ReglaNegocioException("La fecha inicial no puede ser mayor que la fecha final.");
+ 
+            inicio = desde.Date;
+            fin = hasta.Date.AddDays(1);
+        }
+    }
+}
+ 
+
+3. Capa de Presentación
+Formularios de Windows Forms. Muestran datos y recogen lo que escribe el usuario; no contienen SQL.
+3.1 Program
+Archivo: Program.cs. Punto de entrada: abre la ventana principal.
+using System;
+using System.Windows.Forms;
+ 
+namespace FerreteriaTornilloFeliz
+{
+    internal static class Program
+    {
+        [STAThread]
+        static void Main()
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new Presentacion.FrmPrincipal());
+        }
+    }
+}
+ 
+
+3.2 Logo
+Archivo: Presentacion/Logo.cs. Carga el logo y el ícono desde la carpeta Recursos.
+using System.Drawing;
+using System.IO;
+using System.Windows.Forms;
+ 
+namespace FerreteriaTornilloFeliz.Presentacion
+{
+    /// <summary>
+    /// Carga el logo del sistema desde la carpeta Recursos junto al ejecutable.
+    /// Si el archivo no existe, devuelve null y el sistema funciona igual, sin logo.
+    /// </summary>
+    public static class Logo
+    {
+        private static string Ruta(string archivo)
+        {
+            return Path.Combine(Application.StartupPath, "Recursos", archivo);
+        }
+ 
+        public static Image ObtenerImagen()
+        {
+            try
+            {
+                string ruta = Ruta("logo.png");
+                return File.Exists(ruta) ? Image.FromFile(ruta) : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+ 
+        public static Icon ObtenerIcono()
+        {
+            try
+            {
+                string ruta = Ruta("logo.ico");
+                return File.Exists(ruta) ? new Icon(ruta) : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+}
+ 
+
+3.3 Tema
+Archivo: Presentacion/Tema.cs. Colores y estilos visuales del sistema.
+using System;
+using System.Drawing;
+using System.Windows.Forms;
+ 
+namespace FerreteriaTornilloFeliz.Presentacion
+{
+    /// <summary>
+    /// Tema visual del sistema, tomado de los colores del logo (naranja, ámbar y marrón oscuro).
+    /// Solo cambia la apariencia: no toca la lógica ni la base de datos.
+    /// Uso: Tema.Aplicar(this) al final de CrearControles() de cada formulario.
+    /// </summary>
+    public static class Tema
+    {
+        public static readonly Color Carbon = Color.FromArgb(43, 33, 24);
+        public static readonly Color Marron = Color.FromArgb(91, 70, 54);
+        public static readonly Color Naranja = Color.FromArgb(245, 159, 0);
+        public static readonly Color Ambar = Color.FromArgb(255, 197, 61);
+        public static readonly Color Crema = Color.FromArgb(255, 246, 224);
+        public static readonly Color CremaClara = Color.FromArgb(255, 251, 239);
+        public static readonly Color Terracota = Color.FromArgb(194, 65, 12);
+        public static readonly Color TerracotaOscuro = Color.FromArgb(154, 52, 10);
+        public static readonly Color Linea = Color.FromArgb(227, 213, 191);
+ 
+        /// <summary>Aplica el tema al formulario y a todos sus controles (incluidas las pestañas).</summary>
+        public static void Aplicar(Form form)
+        {
+            form.BackColor = Crema;
+            form.ForeColor = Carbon;
+            form.Font = new Font("Segoe UI", 9F);
+            AplicarA(form);
+        }
+ 
+        /// <summary>Menú oscuro con resaltado marrón y letras blancas.</summary>
+        public static void EstiloMenu(MenuStrip menu)
+        {
+            menu.BackColor = Carbon;
+            menu.ForeColor = Color.White;
+            menu.Renderer = new ToolStripProfessionalRenderer(new ColoresMenu());
+            foreach (ToolStripItem item in menu.Items)
+            {
+                item.ForeColor = Color.White;
+            }
+        }
+ 
+        private static void AplicarA(Control padre)
+        {
+            foreach (Control c in padre.Controls)
+            {
+                Button boton = c as Button;
+                if (boton != null) EstiloBoton(boton);
+ 
+                DataGridView tabla = c as DataGridView;
+                if (tabla != null) EstiloTabla(tabla);
+ 
+                TabPage pestana = c as TabPage;
+                if (pestana != null)
+                {
+                    pestana.UseVisualStyleBackColor = false;
+                    pestana.BackColor = Crema;
+                }
+ 
+                AplicarA(c);
+            }
+        }
+ 
+        // Naranja para acciones principales; terracota para las que quitan o cancelan.
+        private static void EstiloBoton(Button b)
+        {
+            bool secundario = b.Text.StartsWith("Desactivar") || b.Text.StartsWith("Cancelar") || b.Text.StartsWith("Quitar");
+ 
+            b.UseVisualStyleBackColor = false;
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderSize = 0;
+            b.FlatAppearance.MouseOverBackColor = secundario ? TerracotaOscuro : Ambar;
+            b.FlatAppearance.MouseDownBackColor = secundario ? TerracotaOscuro : Naranja;
+            b.Cursor = Cursors.Hand;
+            b.Font = new Font(b.Font, FontStyle.Bold);
+ 
+            PintarEstado(b, secundario);
+            // Los botones se activan y desactivan según el estado de la pantalla: se repinta en cada cambio.
+            b.EnabledChanged += delegate { PintarEstado(b, secundario); };
+        }
+ 
+        private static void PintarEstado(Button b, bool secundario)
+        {
+            if (b.Enabled)
+            {
+                b.BackColor = secundario ? Terracota : Naranja;
+                b.ForeColor = secundario ? Color.White : Carbon;
+            }
+            else
+            {
+                b.BackColor = Color.FromArgb(226, 214, 195);
+                b.ForeColor = Color.FromArgb(140, 125, 110);
+            }
+        }
+ 
+        private static void EstiloTabla(DataGridView g)
+        {
+            g.EnableHeadersVisualStyles = false;
+            g.BorderStyle = BorderStyle.None;
+            g.BackgroundColor = Color.White;
+            g.GridColor = Linea;
+            g.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+            g.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+            g.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            g.ColumnHeadersHeight = 32;
+            g.RowTemplate.Height = 26;
+ 
+            g.ColumnHeadersDefaultCellStyle.BackColor = Carbon;
+            g.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            g.ColumnHeadersDefaultCellStyle.SelectionBackColor = Carbon;
+            g.ColumnHeadersDefaultCellStyle.SelectionForeColor = Color.White;
+            g.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+ 
+            g.DefaultCellStyle.SelectionBackColor = Ambar;
+            g.DefaultCellStyle.SelectionForeColor = Carbon;
+            g.AlternatingRowsDefaultCellStyle.BackColor = CremaClara;
+        }
+ 
+        // Colores del menú (sin azul del tema de Windows).
+        private class ColoresMenu : ProfessionalColorTable
+        {
+            public override Color MenuStripGradientBegin { get { return Carbon; } }
+            public override Color MenuStripGradientEnd { get { return Carbon; } }
+            public override Color MenuItemSelected { get { return Marron; } }
+            public override Color MenuItemSelectedGradientBegin { get { return Marron; } }
+            public override Color MenuItemSelectedGradientEnd { get { return Marron; } }
+            public override Color MenuItemPressedGradientBegin { get { return Marron; } }
+            public override Color MenuItemPressedGradientMiddle { get { return Marron; } }
+            public override Color MenuItemPressedGradientEnd { get { return Marron; } }
+            public override Color MenuItemBorder { get { return Naranja; } }
+            public override Color MenuBorder { get { return Naranja; } }
+        }
+    }
+}
+ 
+
+3.4 FrmPrincipal
+Archivo: Presentacion/FrmPrincipal.cs. Ventana principal: menú y alertas de stock.
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Windows.Forms;
+using FerreteriaTornilloFeliz.Entidades;
+using FerreteriaTornilloFeliz.LogicaNegocios;
+ 
+namespace FerreteriaTornilloFeliz.Presentacion
+{
+    /// <summary>
+    /// Ventana principal: muestra el logo, el menú de módulos y la alerta de productos
+    /// con stock en el mínimo o por debajo. Los controles se crean por código.
+    /// </summary>
+    public partial class FrmPrincipal : Form
+    {
+        private readonly ProductoLN _productoLN = new ProductoLN();
+        private DataGridView dgvAlertas;
+        private Label lblResumenAlertas;
+ 
+        public FrmPrincipal()
+        {
+            InitializeComponent();
+            CrearControles();
+            CargarAlertas();
+        }
+ 
+        private void CrearControles()
+        {
+            Text = "El Tornillo Feliz - Inventario y ventas";
+            ClientSize = new Size(760, 500);
+            MinimumSize = new Size(700, 450); 
+            StartPosition = FormStartPosition.CenterScreen;
+ 
+            Icon icono = Logo.ObtenerIcono();
+            if (icono != null) Icon = icono;
+ 
+            // Menú
+            MenuStrip menu = new MenuStrip();
+            ToolStripMenuItem mnuProductos = new ToolStripMenuItem("Productos");
+            mnuProductos.Click += mnuProductos_Click;
+            ToolStripMenuItem mnuVentas = new ToolStripMenuItem("Ventas");
+            mnuVentas.Click += mnuVentas_Click;
+            ToolStripMenuItem mnuReportes = new ToolStripMenuItem("Reportes");
+            mnuReportes.Click += mnuReportes_Click;
+            ToolStripMenuItem mnuSalir = new ToolStripMenuItem("Salir");
+            mnuSalir.Click += delegate { Close(); };
+            menu.Items.Add(mnuProductos);
+            menu.Items.Add(mnuVentas);
+            menu.Items.Add(mnuReportes);
+            menu.Items.Add(mnuSalir);
+            MainMenuStrip = menu;
+            Controls.Add(menu);
+ 
+            // Encabezado oscuro con logo
+            Panel pnlEncabezado = new Panel
+            {
+                Left = 0,
+                Top = 28,
+                Width = ClientSize.Width,
+                Height = 80,
+                BackColor = Tema.Carbon,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+            pnlEncabezado.Controls.Add(new PictureBox
+            {
+                Left = 15,
+                Top = 8,
+                Width = 64,
+                Height = 64,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Image = Logo.ObtenerImagen()
+            });
+            pnlEncabezado.Controls.Add(new Label
+            {
+                Text = "Ferretería El Tornillo Feliz",
+                Left = 92,
+                Top = 10,
+                AutoSize = true,
+                Font = new Font("Segoe UI", 18F, FontStyle.Bold),
+                ForeColor = Tema.Ambar
+            });
+            pnlEncabezado.Controls.Add(new Label
+            {
+                Text = "Sistema de inventario y ventas",
+                Left = 95,
+                Top = 48,
+                AutoSize = true,
+                ForeColor = Tema.Crema
+            });
+            Controls.Add(pnlEncabezado);
+ 
+            // Alertas de stock
+            GroupBox gbAlertas = new GroupBox
+            {
+                Text = "Alertas de stock",
+                Left = 12,
+                Top = 120,
+                Width = 736,
+                Height = 365,
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+            };
+ 
+            lblResumenAlertas = new Label { Left = 10, Top = 22, Width = 700, AutoSize = false, Height = 20 };
+            gbAlertas.Controls.Add(lblResumenAlertas);
+ 
+            dgvAlertas = new DataGridView
+            {
+                Left = 10,
+                Top = 48,
+                Width = 716,
+                Height = 305,
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AutoGenerateColumns = false,
+                RowHeadersVisible = false,
+                BackgroundColor = Color.White,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+            };
+            dgvAlertas.Columns.Add(CrearColumna("Código", "Codigo", 15));
+            dgvAlertas.Columns.Add(CrearColumna("Producto", "Nombre", 40));
+            dgvAlertas.Columns.Add(CrearColumna("Categoría", "Categoria", 20));
+            dgvAlertas.Columns.Add(CrearColumna("Stock", "Stock", 12));
+            dgvAlertas.Columns.Add(CrearColumna("Mínimo", "StockMinimo", 12));
+            gbAlertas.Controls.Add(dgvAlertas);
+ 
+            Controls.Add(gbAlertas);
+ 
+            Tema.EstiloMenu(menu);
+            Tema.Aplicar(this);
+        }
+ 
+        private static DataGridViewTextBoxColumn CrearColumna(string titulo, string propiedad, float peso)
+        {
+            return new DataGridViewTextBoxColumn
+            {
+                HeaderText = titulo,
+                DataPropertyName = propiedad,
+                FillWeight = peso
+            };
+        }
+ 
+        private void CargarAlertas()
+        {
+            try
+            {
+                List<Producto> bajos = _productoLN.ListarBajoMinimo();
+                dgvAlertas.DataSource = bajos;
+                dgvAlertas.ClearSelection();
+ 
+                lblResumenAlertas.Text = bajos.Count == 0
+                    ? "Todos los productos tienen existencias suficientes."
+                    : bajos.Count + " producto(s) en o bajo el stock mínimo. Conviene reabastecerlos.";
+            }
+            catch (Exception ex)
+            {
+                lblResumenAlertas.Text = "No se pudo consultar la base de datos: " + ex.Message;
+            }
+        }
+ 
+        private void mnuProductos_Click(object sender, EventArgs e)
+        {
+            using (FrmProductos frm = new FrmProductos())
+            {
+                frm.ShowDialog(this);
+            }
+            CargarAlertas();
+        }
+ 
+        private void mnuVentas_Click(object sender, EventArgs e)
+        {
+            using (FrmVenta frm = new FrmVenta())
+            {
+                frm.ShowDialog(this);
+            }
+            CargarAlertas();
+        }
+ 
+        private void mnuReportes_Click(object sender, EventArgs e)
+        {
+            using (FrmReportes frm = new FrmReportes())
+            {
+                frm.ShowDialog(this);
+            }
+        }
+    }
+}
+ 
+
+3.5 FrmProductos
+Archivo: Presentacion/FrmProductos.cs. Pantalla de gestión de productos.
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Globalization;
+using System.Windows.Forms;
+using FerreteriaTornilloFeliz.Entidades;
+using FerreteriaTornilloFeliz.LogicaNegocios;
+ 
+namespace FerreteriaTornilloFeliz.Presentacion
+{
+    /// <summary>
+    /// Pantalla de administración de productos (registrar, buscar, editar y desactivar).
+    /// Solo maneja la interfaz: las reglas de negocio y el acceso a SQL están en ProductoLN.
+    /// Los controles se crean por código en CrearControles().
+    /// </summary>
+    public partial class FrmProductos : Form
+    {
+        private readonly ProductoLN _productoLN = new ProductoLN();
+        private Producto _productoSeleccionado;   // null = se está creando un producto nuevo
+ 
+        private TextBox txtCodigo, txtNombre, txtPrecioCompra, txtPrecioVenta, txtStock, txtStockMinimo, txtBuscar;
+        private ComboBox cboCategoria;
+        private Button btnNuevo, btnGuardar, btnDesactivar;
+        private DataGridView dgvProductos;
+        private Label lblModo;
+ 
+        public FrmProductos()
+        {
+            InitializeComponent();
+            CrearControles();
+            CargarProductos();
+            Nuevo();
+        }
+ 
+        // ---------- Construcción de la interfaz ----------
+ 
+        private void CrearControles()
+        {
+            Text = "Productos - Ferretería El Tornillo Feliz";
+            ClientSize = new Size(980, 560);
+            MinimumSize = new Size(900, 520);
+            StartPosition = FormStartPosition.CenterParent;
+ 
+            Icon icono = Logo.ObtenerIcono();
+            if (icono != null) Icon = icono;
+ 
+            // Panel izquierdo: datos del producto
+            GroupBox gbDatos = new GroupBox
+            {
+                Text = "Datos del producto",
+                Left = 12,
+                Top = 12,
+                Width = 330,
+                Height = 345
+            };
+ 
+            lblModo = new Label { Left = 15, Top = 24, Width = 300, ForeColor = Color.DimGray };
+            gbDatos.Controls.Add(lblModo);
+ 
+            txtCodigo = AgregarCampo(gbDatos, "Código", 55);
+            txtNombre = AgregarCampo(gbDatos, "Nombre", 90);
+ 
+            gbDatos.Controls.Add(new Label { Text = "Categoría", Left = 15, Top = 129, Width = 120 });
+            cboCategoria = new ComboBox { Left = 140, Top = 125, Width = 170, DropDownStyle = ComboBoxStyle.DropDown };
+            cboCategoria.Items.AddRange(new object[] { "Herramientas", "Tornillería", "Pintura", "Eléctrico", "Plomería", "Otros" });
+            gbDatos.Controls.Add(cboCategoria);
+ 
+            txtPrecioCompra = AgregarCampo(gbDatos, "Precio de compra (Q)", 160);
+            txtPrecioVenta = AgregarCampo(gbDatos, "Precio de venta (Q)", 195);
+            txtStock = AgregarCampo(gbDatos, "Stock", 230);
+            txtStockMinimo = AgregarCampo(gbDatos, "Stock mínimo", 265);
+ 
+            Controls.Add(gbDatos);
+ 
+            // Botones
+            btnNuevo = new Button { Text = "Nuevo", Left = 12, Top = 372, Width = 100, Height = 34 };
+            btnGuardar = new Button { Text = "Guardar", Left = 122, Top = 372, Width = 100, Height = 34 };
+            btnDesactivar = new Button { Text = "Desactivar", Left = 232, Top = 372, Width = 110, Height = 34 };
+            btnNuevo.Click += btnNuevo_Click;
+            btnGuardar.Click += btnGuardar_Click;
+            btnDesactivar.Click += btnDesactivar_Click;
+            Controls.Add(btnNuevo);
+            Controls.Add(btnGuardar);
+            Controls.Add(btnDesactivar);
+ 
+            // Panel derecho: búsqueda y lista
+            Controls.Add(new Label { Text = "Buscar (código o nombre):", Left = 360, Top = 17, Width = 160 });
+            txtBuscar = new TextBox { Left = 525, Top = 13, Width = 300 };
+            txtBuscar.TextChanged += txtBuscar_TextChanged;
+            Controls.Add(txtBuscar);
+ 
+            dgvProductos = new DataGridView
+            {
+                Left = 360,
+                Top = 45,
+                Width = 608,
+                Height = 470,
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AutoGenerateColumns = false,
+                RowHeadersVisible = false,
+                BackgroundColor = Color.White,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+            };
+            dgvProductos.Columns.Add(CrearColumna("Código", "Codigo", 14, null));
+            dgvProductos.Columns.Add(CrearColumna("Nombre", "Nombre", 30, null));
+            dgvProductos.Columns.Add(CrearColumna("Categoría", "Categoria", 16, null));
+            dgvProductos.Columns.Add(CrearColumna("P. compra", "PrecioCompra", 14, "N2"));
+            dgvProductos.Columns.Add(CrearColumna("P. venta", "PrecioVenta", 14, "N2"));
+            dgvProductos.Columns.Add(CrearColumna("Stock", "Stock", 10, null));
+            dgvProductos.Columns.Add(CrearColumna("Mínimo", "StockMinimo", 10, null));
+            dgvProductos.CellClick += dgvProductos_CellClick;
+            dgvProductos.DataBindingComplete += dgvProductos_DataBindingComplete;
+            Controls.Add(dgvProductos);
+ 
+            Controls.Add(new Label
+            {
+                Text = "Filas en rosa: stock en o bajo el mínimo.",
+                Left = 360,
+                Top = 525,
+                Width = 400,
+                ForeColor = Color.DimGray,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left
+            });
+            Tema.Aplicar(this);
+        }
+ 
+        private static TextBox AgregarCampo(Control contenedor, string etiqueta, int y)
+        {
+            contenedor.Controls.Add(new Label { Text = etiqueta, Left = 15, Top = y + 4, Width = 120 });
+            TextBox caja = new TextBox { Left = 140, Top = y, Width = 170 };
+            contenedor.Controls.Add(caja);
+            return caja;
+        }
+ 
+        private static DataGridViewTextBoxColumn CrearColumna(string titulo, string propiedad, float peso, string formato)
+        {
+            DataGridViewTextBoxColumn columna = new DataGridViewTextBoxColumn
+            {
+                HeaderText = titulo,
+                DataPropertyName = propiedad,
+                FillWeight = peso
+            };
+            if (formato != null)
+            {
+                columna.DefaultCellStyle.Format = formato;
+                columna.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            }
+            return columna;
+        }
+ 
+        // ---------- Carga y estado del formulario ----------
+ 
+        private void CargarProductos()
+        {
+            try
+            {
+                dgvProductos.DataSource = _productoLN.Buscar(txtBuscar.Text);
+            }
+            catch (Exception ex)
+            {
+                MostrarError(ex);
+            }
+        }
+ 
+        private void Nuevo()
+        {
+            _productoSeleccionado = null;
+            txtCodigo.Clear();
+            txtNombre.Clear();
+            cboCategoria.Text = "";
+            txtPrecioCompra.Clear();
+            txtPrecioVenta.Clear();
+            txtStock.Clear();
+            txtStockMinimo.Clear();
+ 
+            lblModo.Text = "Nuevo producto";
+            btnGuardar.Text = "Guardar";
+            btnDesactivar.Enabled = false;
+            dgvProductos.ClearSelection();
+            txtCodigo.Focus();
+        }
+ 
+        // ---------- Eventos ----------
+ 
+        private void dgvProductos_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
+        {
+            foreach (DataGridViewRow fila in dgvProductos.Rows)
+            {
+                Producto p = fila.DataBoundItem as Producto;
+                if (p != null && p.BajoMinimo)
+                    fila.DefaultCellStyle.BackColor = Color.MistyRose;
+            }
+            dgvProductos.ClearSelection();
+        }
+ 
+        private void dgvProductos_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+ 
+            Producto p = dgvProductos.Rows[e.RowIndex].DataBoundItem as Producto;
+            if (p == null) return;
+ 
+            _productoSeleccionado = p;
+            txtCodigo.Text = p.Codigo;
+            txtNombre.Text = p.Nombre;
+            cboCategoria.Text = p.Categoria;
+            txtPrecioCompra.Text = p.PrecioCompra.ToString("0.00", CultureInfo.InvariantCulture);
+            txtPrecioVenta.Text = p.PrecioVenta.ToString("0.00", CultureInfo.InvariantCulture);
+            txtStock.Text = p.Stock.ToString(CultureInfo.InvariantCulture);
+            txtStockMinimo.Text = p.StockMinimo.ToString(CultureInfo.InvariantCulture);
+ 
+            lblModo.Text = "Editando: " + p.Nombre;
+            btnGuardar.Text = "Actualizar";
+            btnDesactivar.Enabled = true;
+        }
+ 
+        private void txtBuscar_TextChanged(object sender, EventArgs e)
+        {
+            CargarProductos();
+        }
+ 
+        private void btnNuevo_Click(object sender, EventArgs e)
+        {
+            Nuevo();
+        }
+ 
+        private void btnGuardar_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                Producto p = LeerFormulario();
+ 
+                if (_productoSeleccionado == null)
+                {
+                    _productoLN.Registrar(p);
+                    MessageBox.Show("Producto registrado correctamente.", "Productos",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    p.Id = _productoSeleccionado.Id;
+                    _productoLN.Actualizar(p);
+                    MessageBox.Show("Producto actualizado correctamente.", "Productos",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+ 
+                CargarProductos();
+                Nuevo();
+            }
+            catch (Exception ex)
+            {
+                MostrarError(ex);
+            }
+        }
+ 
+        private void btnDesactivar_Click(object sender, EventArgs e)
+        {
+            if (_productoSeleccionado == null)
+            {
+                MessageBox.Show("Seleccione un producto de la lista.", "Productos",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+ 
+            DialogResult respuesta = MessageBox.Show(
+                "¿Desactivar el producto \"" + _productoSeleccionado.Nombre + "\"?\n\n" +
+                "Dejará de aparecer en el inventario, pero se conservará el historial de ventas.",
+                "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+ 
+            if (respuesta != DialogResult.Yes) return;
+ 
+            try
+            {
+                _productoLN.Desactivar(_productoSeleccionado.Id);
+                CargarProductos();
+                Nuevo();
+            }
+            catch (Exception ex)
+            {
+                MostrarError(ex);
+            }
+        }
+ 
+        // ---------- Lectura y validación de formato de los campos ----------
+ 
+        private Producto LeerFormulario()
+        {
+            return new Producto
+            {
+                Codigo = txtCodigo.Text.Trim(),
+                Nombre = txtNombre.Text.Trim(),
+                Categoria = cboCategoria.Text.Trim(),
+                PrecioCompra = LeerDecimal(txtPrecioCompra, "Precio de compra"),
+                PrecioVenta = LeerDecimal(txtPrecioVenta, "Precio de venta"),
+                Stock = LeerEntero(txtStock, "Stock"),
+                StockMinimo = LeerEntero(txtStockMinimo, "Stock mínimo"),
+                Activo = true
+            };
+        }
+ 
+        // La pantalla solo verifica que el texto sea un número; las reglas (negativos, límites) las valida la lógica.
+        private static decimal LeerDecimal(TextBox caja, string campo)
+        {
+            decimal valor;
+            string texto = caja.Text.Trim().Replace(',', '.');
+ 
+            if (!decimal.TryParse(texto, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
+                                  CultureInfo.InvariantCulture, out valor))
+                throw new ReglaNegocioException("El campo \"" + campo + "\" debe ser un número válido (ejemplo: 25.50).");
+ 
+            return valor;
+        }
+ 
+        private static int LeerEntero(TextBox caja, string campo)
+        {
+            int valor;
+ 
+            if (!int.TryParse(caja.Text.Trim(), NumberStyles.AllowLeadingSign,
+                              CultureInfo.InvariantCulture, out valor))
+                throw new ReglaNegocioException("El campo \"" + campo + "\" debe ser un número entero.");
+ 
+            return valor;
+        }
+ 
+        private static void MostrarError(Exception ex)
+        {
+            if (ex is ReglaNegocioException)
+            {
+                MessageBox.Show(ex.Message, "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show("Ocurrió un error al acceder a los datos.\n\n" + ex.Message,
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+}
+ 
+
+3.6 FrmVenta
+Archivo: Presentacion/FrmVenta.cs. Pantalla de registro de ventas.
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Windows.Forms;
+using FerreteriaTornilloFeliz.Entidades;
+using FerreteriaTornilloFeliz.LogicaNegocios;
+ 
+namespace FerreteriaTornilloFeliz.Presentacion
+{
+    /// <summary>
+    /// Pantalla de ventas: busca productos por código, arma el carrito y confirma la venta.
+    /// Solo maneja la interfaz: la validación final y la transacción SQL están en VentaLN.
+    /// Los controles se crean por código en CrearControles().
+    /// </summary>
+    public partial class FrmVenta : Form
+    {
+        private readonly ProductoLN _productoLN = new ProductoLN();
+        private readonly VentaLN _ventaLN = new VentaLN();
+        private Venta _venta = new Venta();           // carrito actual
+        private Producto _productoActual;             // último producto encontrado
+ 
+        private TextBox txtCodigo;
+        private NumericUpDown nudCantidad;
+        private Button btnBuscar, btnAgregar, btnQuitar, btnCancelar, btnConfirmar;
+        private Label lblInfoProducto, lblTotal;
+        private DataGridView dgvCarrito;
+ 
+        public FrmVenta()
+        {
+            InitializeComponent();
+            CrearControles();
+            CargarCodigosSugeridos();
+            RefrescarCarrito();
+        }
+ 
+        // ---------- Construcción de la interfaz ----------
+ 
+        private void CrearControles()
+        {
+            Text = "Nueva venta - Ferretería El Tornillo Feliz";
+            ClientSize = new Size(900, 560);
+            MinimumSize = new Size(860, 540);
+            StartPosition = FormStartPosition.CenterParent;
+ 
+            Icon icono = Logo.ObtenerIcono();
+            if (icono != null) Icon = icono;
+ 
+            // Zona para agregar productos
+            GroupBox gbAgregar = new GroupBox
+            {
+                Text = "Agregar producto",
+                Left = 12,
+                Top = 12,
+                Width = 876,
+                Height = 115,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+ 
+            gbAgregar.Controls.Add(new Label { Text = "Código", Left = 15, Top = 31, Width = 55 });
+            txtCodigo = new TextBox { Left = 75, Top = 27, Width = 140 };
+            txtCodigo.KeyDown += txtCodigo_KeyDown;
+            gbAgregar.Controls.Add(txtCodigo);
+ 
+            btnBuscar = new Button { Text = "Buscar", Left = 225, Top = 25, Width = 80, Height = 28 };
+            btnBuscar.Click += btnBuscar_Click;
+            gbAgregar.Controls.Add(btnBuscar);
+ 
+            gbAgregar.Controls.Add(new Label { Text = "Cantidad", Left = 330, Top = 31, Width = 60 });
+            nudCantidad = new NumericUpDown { Left = 395, Top = 27, Width = 80, Minimum = 1, Maximum = 100000, Value = 1 };
+            gbAgregar.Controls.Add(nudCantidad);
+ 
+            btnAgregar = new Button { Text = "Agregar", Left = 490, Top = 25, Width = 100, Height = 28 };
+            btnAgregar.Click += btnAgregar_Click;
+            gbAgregar.Controls.Add(btnAgregar);
+ 
+            lblInfoProducto = new Label
+            {
+                Left = 15,
+                Top = 70,
+                Width = 840,
+                Height = 32,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+            };
+            gbAgregar.Controls.Add(lblInfoProducto);
+ 
+            Controls.Add(gbAgregar);
+ 
+            // Carrito
+            dgvCarrito = new DataGridView
+            {
+                Left = 12,
+                Top = 140,
+                Width = 876,
+                Height = 305,
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AutoGenerateColumns = false,
+                RowHeadersVisible = false,
+                BackgroundColor = Color.White,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+            };
+            dgvCarrito.Columns.Add(CrearColumna("Código", "CodigoProducto", 15, null));
+            dgvCarrito.Columns.Add(CrearColumna("Producto", "NombreProducto", 40, null));
+            dgvCarrito.Columns.Add(CrearColumna("Cantidad", "Cantidad", 12, null));
+            dgvCarrito.Columns.Add(CrearColumna("Precio unit. (Q)", "PrecioUnitario", 16, "N2"));
+            dgvCarrito.Columns.Add(CrearColumna("Subtotal (Q)", "Subtotal", 17, "N2"));
+            Controls.Add(dgvCarrito);
+ 
+            // Botones y total
+            btnQuitar = new Button
+            {
+                Text = "Quitar seleccionado",
+                Left = 12,
+                Top = 458,
+                Width = 160,
+                Height = 34,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left
+            };
+            btnQuitar.Click += btnQuitar_Click;
+            Controls.Add(btnQuitar);
+ 
+            btnCancelar = new Button
+            {
+                Text = "Cancelar venta",
+                Left = 182,
+                Top = 458,
+                Width = 130,
+                Height = 34,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Left
+            };
+            btnCancelar.Click += btnCancelar_Click;
+            Controls.Add(btnCancelar);
+ 
+            lblTotal = new Label
+            {
+                Left = 400,
+                Top = 455,
+                Width = 488,
+                Height = 40,
+                TextAlign = ContentAlignment.MiddleRight,
+                Font = new Font("Segoe UI", 20F, FontStyle.Bold),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
+            };
+            Controls.Add(lblTotal);
+ 
+            btnConfirmar = new Button
+            {
+                Text = "Confirmar venta",
+                Left = 688,
+                Top = 505,
+                Width = 200,
+                Height = 40,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right
+            };
+            btnConfirmar.Click += btnConfirmar_Click;
+            Controls.Add(btnConfirmar);
+            Tema.Aplicar(this);
+        }
+ 
+        private static DataGridViewTextBoxColumn CrearColumna(string titulo, string propiedad, float peso, string formato)
+        {
+            DataGridViewTextBoxColumn columna = new DataGridViewTextBoxColumn
+            {
+                HeaderText = titulo,
+                DataPropertyName = propiedad,
+                FillWeight = peso
+            };
+            if (formato != null)
+            {
+                columna.DefaultCellStyle.Format = formato;
+                columna.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            }
+            return columna;
+        }
+ 
+        // Sugiere códigos mientras se escribe en la caja de código.
+        private void CargarCodigosSugeridos()
+        {
+            try
+            {
+                AutoCompleteStringCollection codigos = new AutoCompleteStringCollection();
+                foreach (Producto p in _productoLN.Listar())
+                    codigos.Add(p.Codigo);
+ 
+                txtCodigo.AutoCompleteCustomSource = codigos;
+                txtCodigo.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+                txtCodigo.AutoCompleteSource = AutoCompleteSource.CustomSource;
+            }
+            catch (Exception ex)
+            {
+                MostrarError(ex);
+            }
+        }
+ 
+        // ---------- Lógica de la pantalla ----------
+ 
+        // Busca el producto por código y muestra sus datos. Devuelve false si no se puede vender.
+        private bool BuscarProducto()
+        {
+            _productoActual = null;
+            lblInfoProducto.ForeColor = Color.Black;
+            lblInfoProducto.Text = "";
+ 
+            string codigo = txtCodigo.Text.Trim();
+            if (codigo.Length == 0)
+            {
+                MessageBox.Show("Escriba el código del producto.", "Ventas",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+ 
+            try
+            {
+                Producto p = _productoLN.ObtenerPorCodigo(codigo);
+ 
+                if (p == null)
+                {
+                    lblInfoProducto.ForeColor = Color.Firebrick;
+                    lblInfoProducto.Text = "No existe un producto activo con el código \"" + codigo + "\".";
+                    return false;
+                }
+ 
+                _productoActual = p;
+                lblInfoProducto.Text = p.Nombre + "   |   Precio: Q" + p.PrecioVenta.ToString("N2") +
+                                       "   |   Existencias: " + p.Stock;
+ 
+                if (p.Stock == 0)
+                {
+                    lblInfoProducto.ForeColor = Color.Firebrick;
+                    lblInfoProducto.Text += "   (SIN EXISTENCIAS)";
+                    return false;
+                }
+ 
+                if (p.BajoMinimo)
+                    lblInfoProducto.ForeColor = Color.DarkOrange;
+ 
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MostrarError(ex);
+                return false;
+            }
+        }
+ 
+        private void RefrescarCarrito()
+        {
+            // Se asigna una copia para que la grilla se actualice al cambiar el carrito.
+            dgvCarrito.DataSource = new List<DetalleVenta>(_venta.Detalles);
+            dgvCarrito.ClearSelection();
+ 
+            lblTotal.Text = "Total: Q" + _venta.CalcularTotal().ToString("N2");
+ 
+            bool hayProductos = _venta.Detalles.Count > 0;
+            btnConfirmar.Enabled = hayProductos;
+            btnQuitar.Enabled = hayProductos;
+            btnCancelar.Enabled = hayProductos;
+        }
+ 
+        private void PrepararNuevaLinea()
+        {
+            txtCodigo.Clear();
+            nudCantidad.Value = 1;
+            _productoActual = null;
+            lblInfoProducto.Text = "";
+            txtCodigo.Focus();
+        }
+ 
+        // ---------- Eventos ----------
+ 
+        private void txtCodigo_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                BuscarProducto();
+                nudCantidad.Focus();
+            }
+        }
+ 
+        private void btnBuscar_Click(object sender, EventArgs e)
+        {
+            BuscarProducto();
+        }
+ 
+        private void btnAgregar_Click(object sender, EventArgs e)
+        {
+            // Siempre se consulta de nuevo para trabajar con el stock más reciente.
+            if (!BuscarProducto())
+                return;
+ 
+            int cantidad = (int)nudCantidad.Value;
+ 
+            int yaEnVenta = 0;
+            foreach (DetalleVenta d in _venta.Detalles)
+            {
+                if (d.IdProducto == _productoActual.Id)
+                    yaEnVenta = d.Cantidad;
+            }
+ 
+            if (cantidad + yaEnVenta > _productoActual.Stock)
+            {
+                MessageBox.Show(
+                    "Solo hay " + _productoActual.Stock + " unidad(es) de \"" + _productoActual.Nombre +
+                    "\" y ya tiene " + yaEnVenta + " en esta venta.",
+                    "Stock insuficiente", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+ 
+            _venta.AgregarDetalle(new DetalleVenta
+            {
+                IdProducto = _productoActual.Id,
+                CodigoProducto = _productoActual.Codigo,
+                NombreProducto = _productoActual.Nombre,
+                Cantidad = cantidad,
+                PrecioUnitario = _productoActual.PrecioVenta,
+                CostoUnitario = _productoActual.PrecioCompra
+            });
+ 
+            RefrescarCarrito();
+            PrepararNuevaLinea();
+        }
+ 
+        private void btnQuitar_Click(object sender, EventArgs e)
+        {
+            if (dgvCarrito.SelectedRows.Count == 0)
+            {
+                MessageBox.Show("Seleccione una línea de la venta para quitarla.", "Ventas",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+ 
+            DetalleVenta linea = dgvCarrito.SelectedRows[0].DataBoundItem as DetalleVenta;
+            if (linea == null) return;
+ 
+            _venta.QuitarDetalle(linea.IdProducto);
+            RefrescarCarrito();
+        }
+ 
+        private void btnCancelar_Click(object sender, EventArgs e)
+        {
+            DialogResult respuesta = MessageBox.Show(
+                "¿Cancelar la venta y vaciar la lista de productos?",
+                "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+ 
+            if (respuesta != DialogResult.Yes) return;
+ 
+            _venta = new Venta();
+            RefrescarCarrito();
+            PrepararNuevaLinea();
+        }
+ 
+        private void btnConfirmar_Click(object sender, EventArgs e)
+        {
+            if (_venta.Detalles.Count == 0)
+            {
+                MessageBox.Show("Agregue al menos un producto a la venta.", "Ventas",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+ 
+            DialogResult respuesta = MessageBox.Show(
+                "¿Confirmar la venta por un total de Q" + _venta.CalcularTotal().ToString("N2") + "?",
+                "Confirmar venta", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+ 
+            if (respuesta != DialogResult.Yes) return;
+ 
+            try
+            {
+                int idVenta = _ventaLN.RegistrarVenta(_venta);
+ 
+                MessageBox.Show(
+                    "Venta No. " + idVenta + " registrada correctamente.\nTotal: Q" + _venta.Total.ToString("N2"),
+                    "Ventas", MessageBoxButtons.OK, MessageBoxIcon.Information);
+ 
+                _venta = new Venta();
+                RefrescarCarrito();
+                PrepararNuevaLinea();
+            }
+            catch (Exception ex)
+            {
+                // La venta NO se guardó (rollback). El carrito se conserva para corregirlo.
+                MostrarError(ex);
+            }
+        }
+ 
+        private static void MostrarError(Exception ex)
+        {
+            if (ex is ReglaNegocioException)
+            {
+                MessageBox.Show(ex.Message, "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show("Ocurrió un error al acceder a los datos.\n\n" + ex.Message,
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+}
+ 
+
+3.7 FrmReportes
+Archivo: Presentacion/FrmReportes.cs. Pantalla de reportes: ventas, rentabilidad y por producto.
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Globalization;
+using System.Windows.Forms;
+using FerreteriaTornilloFeliz.Entidades;
+using FerreteriaTornilloFeliz.LogicaNegocios;
+ 
+namespace FerreteriaTornilloFeliz.Presentacion
+{
+    /// <summary>
+    /// Pantalla de reportes: ventas por fechas, rentabilidad con punto de equilibrio y ventas por producto.
+    /// Solo maneja la interfaz: las consultas y fórmulas están en VentaLN, ReporteLN y ConfiguracionLN.
+    /// Los controles se crean por código en CrearControles().
+    /// </summary>
+    public partial class FrmReportes : Form
+    {
+        private readonly VentaLN _ventaLN = new VentaLN();
+        private readonly ReporteLN _reporteLN = new ReporteLN();
+        private readonly ConfiguracionLN _configuracionLN = new ConfiguracionLN();
+ 
+        private DateTimePicker dtpDesde, dtpHasta;
+        private Button btnConsultar, btnGuardarCostos;
+        private TabControl tabs;
+ 
+        private DataGridView dgvVentas, dgvProductos;
+        private Label lblResumenVentas;
+ 
+        private Label lblNumVentas, lblUnidades, lblIngreso, lblCosto, lblUtilidad, lblMargen;
+        private Label lblEquilibrioUnidades, lblEquilibrioQuetzales;
+        private TextBox txtCostosFijos;
+ 
+        public FrmReportes()
+        {
+            InitializeComponent();
+            CrearControles();
+            CargarCostosFijos();
+            Consultar();
+        }
+ 
+        // ---------- Construcción de la interfaz ----------
+ 
+        private void CrearControles()
+        {
+            Text = "Reportes - Ferretería El Tornillo Feliz";
+            ClientSize = new Size(900, 600);
+            MinimumSize = new Size(860, 560);
+            StartPosition = FormStartPosition.CenterParent;
+ 
+            Icon icono = Logo.ObtenerIcono();
+            if (icono != null) Icon = icono;
+ 
+            // Selector de período
+            Controls.Add(new Label { Text = "Desde", Left = 12, Top = 17, Width = 45 });
+            dtpDesde = new DateTimePicker
+            {
+                Left = 60,
+                Top = 13,
+                Width = 125,
+                Format = DateTimePickerFormat.Short,
+                Value = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1)
+            };
+            Controls.Add(dtpDesde);
+ 
+            Controls.Add(new Label { Text = "Hasta", Left = 205, Top = 17, Width = 45 });
+            dtpHasta = new DateTimePicker
+            {
+                Left = 253,
+                Top = 13,
+                Width = 125,
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today
+            };
+            Controls.Add(dtpHasta);
+ 
+            btnConsultar = new Button { Text = "Consultar", Left = 400, Top = 11, Width = 110, Height = 28 };
+            btnConsultar.Click += btnConsultar_Click;
+            Controls.Add(btnConsultar);
+ 
+            // Pestañas
+            tabs = new TabControl
+            {
+                Left = 12,
+                Top = 50,
+                Width = 876,
+                Height = 538,
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+            };
+            TabPage tabVentas = new TabPage("Ventas");
+            TabPage tabRentabilidad = new TabPage("Rentabilidad");
+            TabPage tabProductos = new TabPage("Por producto");
+            tabs.TabPages.Add(tabVentas);
+            tabs.TabPages.Add(tabRentabilidad);
+            tabs.TabPages.Add(tabProductos);
+            Controls.Add(tabs);
+ 
+            CrearPestanaVentas(tabVentas);
+            CrearPestanaRentabilidad(tabRentabilidad);
+            CrearPestanaProductos(tabProductos);
+            Tema.Aplicar(this);
+        }
+ 
+        private void CrearPestanaVentas(TabPage tab)
+        {
+            dgvVentas = CrearGrilla();
+            dgvVentas.Columns.Add(CrearColumna("No. de venta", "Id", 20, null));
+            dgvVentas.Columns.Add(CrearColumna("Fecha", "Fecha", 40, "dd/MM/yyyy HH:mm"));
+            dgvVentas.Columns.Add(CrearColumna("Total (Q)", "Total", 40, "N2"));
+ 
+            lblResumenVentas = new Label
+            {
+                Dock = DockStyle.Bottom,
+                Height = 32,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+            };
+ 
+            tab.Controls.Add(dgvVentas);
+            tab.Controls.Add(lblResumenVentas);
+            dgvVentas.BringToFront();   // la grilla (Fill) se acomoda al final, con el espacio que sobra
+        }
+ 
+        private void CrearPestanaRentabilidad(TabPage tab)
+        {
+            GroupBox gbResultados = new GroupBox
+            {
+                Text = "Resultados del período",
+                Left = 8,
+                Top = 8,
+                Width = 430,
+                Height = 215
+            };
+            lblNumVentas = AgregarDato(gbResultados, "Ventas realizadas", 28);
+            lblUnidades = AgregarDato(gbResultados, "Unidades vendidas", 56);
+            lblIngreso = AgregarDato(gbResultados, "Ingreso total", 84);
+            lblCosto = AgregarDato(gbResultados, "Costo de lo vendido", 112);
+            lblUtilidad = AgregarDato(gbResultados, "Utilidad", 140);
+            lblMargen = AgregarDato(gbResultados, "Margen de utilidad", 168);
+            tab.Controls.Add(gbResultados);
+ 
+            GroupBox gbEquilibrio = new GroupBox
+            {
+                Text = "Punto de equilibrio",
+                Left = 8,
+                Top = 235,
+                Width = 850,
+                Height = 235
+            };
+ 
+            gbEquilibrio.Controls.Add(new Label { Text = "Costos fijos mensuales (Q)", Left = 15, Top = 34, Width = 200 });
+            txtCostosFijos = new TextBox { Left = 220, Top = 30, Width = 120 };
+            gbEquilibrio.Controls.Add(txtCostosFijos);
+ 
+            btnGuardarCostos = new Button { Text = "Guardar", Left = 350, Top = 28, Width = 100, Height = 28 };
+            btnGuardarCostos.Click += btnGuardarCostos_Click;
+            gbEquilibrio.Controls.Add(btnGuardarCostos);
+ 
+            lblEquilibrioUnidades = AgregarDato(gbEquilibrio, "Equilibrio en unidades", 72);
+            lblEquilibrioQuetzales = AgregarDato(gbEquilibrio, "Equilibrio en ventas (Q)", 100);
+ 
+            gbEquilibrio.Controls.Add(new Label
+            {
+                Left = 15,
+                Top = 140,
+                Width = 820,
+                Height = 80,
+                ForeColor = Color.DimGray,
+                Text = "Punto de equilibrio = costos fijos ÷ utilidad promedio por unidad vendida en el período. " +
+                       "Indica cuántas unidades (o cuántos quetzales en ventas) se necesitan para cubrir los costos fijos. " +
+                       "Los costos fijos se consideran mensuales y el cálculo usa el margen real de las ventas del período consultado."
+            });
+ 
+            tab.Controls.Add(gbEquilibrio);
+        }
+ 
+        private void CrearPestanaProductos(TabPage tab)
+        {
+            dgvProductos = CrearGrilla();
+            dgvProductos.Columns.Add(CrearColumna("Código", "Codigo", 14, null));
+            dgvProductos.Columns.Add(CrearColumna("Producto", "Nombre", 32, null));
+            dgvProductos.Columns.Add(CrearColumna("Unidades", "Unidades", 12, null));
+            dgvProductos.Columns.Add(CrearColumna("Ingreso (Q)", "Ingreso", 14, "N2"));
+            dgvProductos.Columns.Add(CrearColumna("Costo (Q)", "Costo", 14, "N2"));
+            dgvProductos.Columns.Add(CrearColumna("Utilidad (Q)", "Utilidad", 14, "N2"));
+            tab.Controls.Add(dgvProductos);
+        }
+ 
+        // Dentro de las pestañas se usa Dock = Fill (y no Anchor): así la grilla siempre ocupa
+        // exactamente el área visible de la pestaña, sin importar el tamaño de la ventana.
+        private static DataGridView CrearGrilla()
+        {
+            return new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                MultiSelect = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                AutoGenerateColumns = false,
+                RowHeadersVisible = false,
+                BackgroundColor = Color.White,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill
+            };
+        }
+ 
+        private static DataGridViewTextBoxColumn CrearColumna(string titulo, string propiedad, float peso, string formato)
+        {
+            DataGridViewTextBoxColumn columna = new DataGridViewTextBoxColumn
+            {
+                HeaderText = titulo,
+                DataPropertyName = propiedad,
+                FillWeight = peso
+            };
+            if (formato != null)
+            {
+                columna.DefaultCellStyle.Format = formato;
+                columna.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+            }
+            return columna;
+        }
+ 
+        // Agrega una fila "etiqueta ........ valor" y devuelve la etiqueta del valor para actualizarla después.
+        private static Label AgregarDato(Control contenedor, string etiqueta, int y)
+        {
+            contenedor.Controls.Add(new Label { Text = etiqueta, Left = 15, Top = y, Width = 200 });
+ 
+            Label valor = new Label
+            {
+                Left = 220,
+                Top = y - 3,
+                Width = 190,
+                Height = 24,
+                TextAlign = ContentAlignment.MiddleRight,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold)
+            };
+            contenedor.Controls.Add(valor);
+            return valor;
+        }
+ 
+        // ---------- Carga de datos ----------
+ 
+        private void CargarCostosFijos()
+        {
+            try
+            {
+                txtCostosFijos.Text = _configuracionLN.ObtenerCostosFijos().ToString("0.00", CultureInfo.InvariantCulture);
+            }
+            catch (Exception ex)
+            {
+                MostrarError(ex);
+            }
+        }
+ 
+        // Consulta las tres pestañas con el mismo período.
+        private void Consultar()
+        {
+            try
+            {
+                DateTime desde = dtpDesde.Value.Date;
+                DateTime hasta = dtpHasta.Value.Date;
+ 
+                CargarVentas(desde, hasta);
+                CargarRentabilidad(desde, hasta);
+                CargarProductos(desde, hasta);
+            }
+            catch (Exception ex)
+            {
+                MostrarError(ex);
+            }
+        }
+ 
+        private void CargarVentas(DateTime desde, DateTime hasta)
+        {
+            List<Venta> ventas = _ventaLN.ListarPorFechas(desde, hasta);
+            dgvVentas.DataSource = ventas;
+            dgvVentas.ClearSelection();
+ 
+            decimal total = 0;
+            foreach (Venta v in ventas)
+                total += v.Total;
+ 
+            lblResumenVentas.Text = ventas.Count == 0
+                ? "No hay ventas en el período seleccionado."
+                : ventas.Count + " venta(s) en el período. Total vendido: Q" + total.ToString("N2");
+        }
+ 
+        private void CargarRentabilidad(DateTime desde, DateTime hasta)
+        {
+            ResultadoRentabilidad r = _reporteLN.Rentabilidad(desde, hasta);
+ 
+            lblNumVentas.Text = r.NumeroVentas.ToString("N0");
+            lblUnidades.Text = r.UnidadesVendidas.ToString("N0");
+            lblIngreso.Text = "Q" + r.Ingreso.ToString("N2");
+            lblCosto.Text = "Q" + r.Costo.ToString("N2");
+            lblUtilidad.Text = "Q" + r.Utilidad.ToString("N2");
+            lblMargen.Text = r.MargenPorcentaje.ToString("N2") + " %";
+ 
+            lblUtilidad.ForeColor = r.Utilidad < 0 ? Color.Firebrick : Color.DarkGreen;
+ 
+            if (r.PuntoEquilibrioUnidades.HasValue && r.PuntoEquilibrioQuetzales.HasValue)
+            {
+                lblEquilibrioUnidades.Text = r.PuntoEquilibrioUnidades.Value.ToString("N0") + " unidades";
+                lblEquilibrioQuetzales.Text = "Q" + r.PuntoEquilibrioQuetzales.Value.ToString("N2");
+            }
+            else
+            {
+                lblEquilibrioUnidades.Text = "No calculable";
+                lblEquilibrioQuetzales.Text = "No calculable";
+            }
+        }
+ 
+        private void CargarProductos(DateTime desde, DateTime hasta)
+        {
+            dgvProductos.DataSource = _reporteLN.MasVendidos(desde, hasta);
+            dgvProductos.ClearSelection();
+        }
+ 
+        // ---------- Eventos ----------
+ 
+        private void btnConsultar_Click(object sender, EventArgs e)
+        {
+            Consultar();
+        }
+ 
+        private void btnGuardarCostos_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                decimal valor = LeerDecimal(txtCostosFijos, "Costos fijos mensuales");
+                _configuracionLN.GuardarCostosFijos(valor);
+ 
+                CargarCostosFijos();
+                CargarRentabilidad(dtpDesde.Value.Date, dtpHasta.Value.Date);
+ 
+                MessageBox.Show("Costos fijos guardados correctamente.", "Reportes",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MostrarError(ex);
+            }
+        }
+ 
+        // La pantalla solo verifica que el texto sea un número; las reglas (negativos, límites) las valida la lógica.
+        private static decimal LeerDecimal(TextBox caja, string campo)
+        {
+            decimal valor;
+            string texto = caja.Text.Trim().Replace(',', '.');
+ 
+            if (!decimal.TryParse(texto, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
+                                  CultureInfo.InvariantCulture, out valor))
+                throw new ReglaNegocioException("El campo \"" + campo + "\" debe ser un número válido (ejemplo: 3000.00).");
+ 
+            return valor;
+        }
+ 
+        private static void MostrarError(Exception ex)
+        {
+            if (ex is ReglaNegocioException)
+            {
+                MessageBox.Show(ex.Message, "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            else
+            {
+                MessageBox.Show("Ocurrió un error al acceder a los datos.\n\n" + ex.Message,
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+}
+ 
+
